@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - Restricted Access</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #1a1a2e; color: white; }
+        .login-container { max-width: 400px; margin: 100px auto; padding: 30px; background: #16213e; border-radius: 8px; box-shadow: 0 0 15px rgba(0,0,0,0.5); border: 1px solid #0f3460; }
+        .error { color: #e94560; font-size: 0.9em; margin-top: 10px; text-align: center; }
+        h2 { color: #e94560; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="login-container">
+            <h2 class="text-center">Admin Panel</h2>
+            <p class="text-center text-muted">Authorized Personnel Only</p>
+            
+            <form id="adminLoginForm">
+                <div class="mb-3">
+                    <label class="form-label">Admin Email</label>
+                    <input type="email" class="form-control" id="email" required placeholder="admin@gmail.com">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <input type="password" class="form-control" id="password" required>
+                </div>
+                
+                <div class="error" id="errorMsg"></div>
+
+                <button type="submit" class="btn btn-danger w-100 mt-3" id="loginBtn">Access Dashboard</button>
+            </form>
+            <p class="text-center mt-3"><a href="index.html" class="text-decoration-none text-light">Go to Customer Login</a></p>
+        </div>
+    </div>
+
+    <script type="module">
+        import { auth } from './firebase-config.js';
+        import { signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+        // *** ADMIN LIST *** (যাদের এক্সেস থাকবে)
+        const ADMIN_EMAILS = ["admin@gmail.com", "manager@gmail.com"];
+
+        document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const errorMsg = document.getElementById('errorMsg');
+            const btn = document.getElementById('loginBtn');
+
+            errorMsg.textContent = "";
+            btn.textContent = "Checking Access...";
+            btn.disabled = true;
+
+            try {
+                // ১. আগে লগিন চেক করবে
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+
+                // ২. চেক করবে ইমেইলটি অ্যাডমিন লিস্টে আছে কিনা
+                if (ADMIN_EMAILS.includes(user.email)) {
+                    // যদি অ্যাডমিন হয়
+                    alert("Welcome Admin!");
+                    localStorage.setItem('userRole', 'admin');
+                    window.location.href = 'admin-dashboard.html';
+                } else {
+                    // যদি কাস্টমার অ্যাডমিন প্যানেলে লগিন করার চেষ্টা করে
+                    await signOut(auth); // সাথে সাথে লগআউট করে দিবে
+                    throw new Error("Access Denied: You are not an Admin.");
+                }
+
+            } catch (error) {
+                console.error(error);
+                btn.textContent = "Access Dashboard";
+                btn.disabled = false;
+                
+                if (error.message.includes("Access Denied")) {
+                    errorMsg.textContent = "⚠ ACCESS DENIED: This account is not an Admin.";
+                } else {
+                    errorMsg.textContent = "Invalid Email or Password.";
+                }
+            }
+        });
+    </script>
+</body>
+</html>

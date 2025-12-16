@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>User Dashboard - Car Shop</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Segoe UI', sans-serif; }
+        .car-card { transition: 0.3s; border: none; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .car-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.15); }
+        .card-img-top { height: 180px; object-fit: cover; background-color: #eee; }
+        .status-card { background: white; border-radius: 8px; transition: 0.3s; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top px-4">
+        <a class="navbar-brand fw-bold" href="#">It's A Deal</a>
+        <div class="ms-auto d-flex align-items-center">
+            <span id="userEmailDisplay" class="text-light me-3 small d-none d-md-block"></span>
+            <button id="logoutBtn" class="btn btn-light btn-sm fw-bold text-primary px-3">Logout</button>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-lg-8">
+                <h4 class="text-secondary fw-bold mb-3">Available Cars</h4>
+                <div id="carList" class="row g-3"></div>
+            </div>
+            <div class="col-lg-4">
+                <div class="card border-0 shadow-sm sticky-top" style="top: 80px;">
+                    <div class="card-header bg-white fw-bold">My Booking Status</div>
+                    <div class="card-body p-2" id="myOrders">
+                        <p class="text-center text-muted small mt-3">Loading...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="bookingModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-light">
+                    <h5 class="modal-title fw-bold">Confirm Booking</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="text-center mb-4">
+                        <h4 id="modalCarName" class="text-primary fw-bold"></h4>
+                        <p id="modalPrice" class="text-danger fs-5 fw-bold mb-1"></p>
+                        <span class="badge bg-info text-dark">Processing: <span id="modalBurst"></span> Days</span>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Phone Number</label>
+                        <input type="tel" id="phoneInput" class="form-control" required>
+                    </div>
+                    <hr>
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="hasMembership" onchange="togglePinInput()">
+                        <label class="form-check-label fw-bold" for="hasMembership">I have Membership</label>
+                    </div>
+                    <div class="mb-3 p-3 bg-light rounded border" id="pinSection" style="display: none;">
+                        <label class="text-danger small fw-bold">Enter Membership Card PIN</label>
+                        <input type="password" id="memberPin" class="form-control text-center" maxlength="4">
+                    </div>
+                </div>
+                <div class="modal-footer border-0">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-success fw-bold" onclick="confirmBooking()">Confirm</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script type="module">
+        import { auth, db } from './firebase-config.js';
+        import { signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+        import { collection, addDoc, doc, updateDoc, query, where, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+        let currentUserEmail = "";
+        let selectedCar = {};
+
+        const cars = [
+            { id: 1, model: 'Tesla Model S', price: 80000, img: 'images/cars/car1.jpg', bt: 8 },
+            { id: 2, model: 'BMW X5', price: 60000, img: 'images/cars/car2.jpg', bt: 7 },
+            { id: 3, model: 'Audi A4', price: 45000, img: 'images/cars/car3.jpg', bt: 5 },
+            { id: 4, model: 'Ford Mustang', price: 55000, img: 'images/cars/car4.jpg', bt: 6 },
+            { id: 5, model: 'Honda Civic', price: 25000, img: 'images/cars/car5.jpg', bt: 3 },
+            { id: 6, model: 'Toyota Camry', price: 30000, img: 'images/cars/car6.jpg', bt: 3 },
+            { id: 7, model: 'Mercedes C-Class', price: 50000, img: 'images/cars/car7.jpg', bt: 6 },
+            { id: 8, model: 'Nissan Altima', price: 28000, img: 'images/cars/car8.jpg', bt: 4 },
+            { id: 9, model: 'Chevrolet Malibu', price: 27000, img: 'images/cars/car9.jpg', bt: 4 },
+            { id: 10, model: 'Volkswagen Passat', price: 32000, img: 'images/cars/car10.jpg', bt: 5 },
+            { id: 11, model: 'Hyundai Sonata', price: 26000, img: 'images/cars/car11.jpg', bt: 4 },
+            { id: 12, model: 'Kia Optima', price: 24000, img: 'images/cars/car12.jpg', bt: 3 },
+            { id: 13, model: 'Subaru Legacy', price: 29000, img: 'images/cars/car13.jpg', bt: 4 },
+            { id: 14, model: 'Mazda 6', price: 31000, img: 'images/cars/car14.jpg', bt: 5 },
+            { id: 15, model: 'Lexus ES', price: 55000, img: 'images/cars/car15.jpg', bt: 6 },
+            { id: 16, model: 'Infiniti Q50', price: 48000, img: 'images/cars/car16.jpg', bt: 5 },
+            { id: 17, model: 'Acura TLX', price: 42000, img: 'images/cars/car17.jpg', bt: 5 },
+            { id: 18, model: 'Volvo S60', price: 47000, img: 'images/cars/car18.jpg', bt: 6 },
+            { id: 19, model: 'Jaguar XE', price: 52000, img: 'images/cars/car19.jpg', bt: 7 },
+            { id: 20, model: 'Porsche Panamera', price: 90000, img: 'images/cars/car20.jpg', bt: 9 }
+        ];
+
+        const carListContainer = document.getElementById('carList');
+        cars.forEach(car => {
+            carListContainer.innerHTML += `
+                <div class="col-md-6 col-lg-4">
+                    <div class="card car-card h-100">
+                        <img src="${car.img}" class="card-img-top" onerror="this.src='https://via.placeholder.com/300x180?text=${car.model}'">
+                        <div class="card-body p-2">
+                            <h6 class="fw-bold small">${car.model}</h6>
+                            <p class="text-danger fw-bold small mb-1">$${car.price.toLocaleString()}</p>
+                            <small class="text-muted d-block mb-2">Process Time: ${car.bt} Days</small>
+                            <button class="btn btn-primary btn-sm w-100" onclick="window.openBooking(${car.id})">Book</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        window.togglePinInput = () => document.getElementById('pinSection').style.display = document.getElementById('hasMembership').checked ? 'block' : 'none';
+
+        window.openBooking = (id) => {
+            selectedCar = cars.find(c => c.id === id);
+            document.getElementById('modalCarName').innerText = selectedCar.model;
+            document.getElementById('modalPrice').innerText = "$" + selectedCar.price.toLocaleString();
+            document.getElementById('modalBurst').innerText = selectedCar.bt;
+            document.getElementById('phoneInput').value = "";
+            document.getElementById('memberPin').value = "";
+            document.getElementById('hasMembership').checked = false;
+            togglePinInput();
+            new bootstrap.Modal(document.getElementById('bookingModal')).show();
+        };
+
+        window.confirmBooking = async () => {
+            const phone = document.getElementById('phoneInput').value;
+            const hasMember = document.getElementById('hasMembership').checked;
+            const pin = document.getElementById('memberPin').value;
+            if (!phone) return alert("Enter Phone Number!");
+
+            let priority = 3; let memType = "Normal";
+            if (hasMember) {
+                if (pin === "9999") { priority = 1; memType = "Platinum"; }
+                else if (pin === "7777") { priority = 2; memType = "Gold"; }
+                else { alert("Wrong PIN! Normal Priority."); priority = 3; }
+            }
+
+            try {
+                await addDoc(collection(db, "orders"), {
+                    userEmail: currentUserEmail,
+                    carName: selectedCar.model,
+                    price: selectedCar.price,
+                    phone: phone,
+                    status: "Pending",
+                    priority: priority,
+                    membership: memType,
+                    burstTime: selectedCar.bt,
+                    timestamp: serverTimestamp()
+                });
+                alert("Order Placed!");
+                bootstrap.Modal.getInstance(document.getElementById('bookingModal')).hide();
+            } catch (error) { alert("Failed."); }
+        };
+
+        window.acceptOffer = async (id, price, date) => {
+            if(confirm("Do you accept this special offer?")) {
+                await updateDoc(doc(db, "orders", id), { status: "Confirmed", price: price, deliveryDate: date });
+                alert("Confirmed!");
+            }
+        };
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) { currentUserEmail = user.email; document.getElementById('userEmailDisplay').innerText = user.email; loadMyOrders(user.email); }
+            else window.location.href = 'index.html';
+        });
+
+        function loadMyOrders(email) {
+            const q = query(collection(db, "orders"), where("userEmail", "==", email));
+            onSnapshot(q, (snapshot) => {
+                const list = document.getElementById('myOrders');
+                list.innerHTML = "";
+                if(snapshot.empty) list.innerHTML = "<p class='text-center text-muted'>No bookings.</p>";
+
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data();
+                    let badge = data.priority === 1 ? "bg-danger" : (data.priority === 2 ? "bg-warning text-dark" : "bg-secondary");
+                    
+                    let statusHtml = "";
+                    if(data.status === "Offer Sent") {
+                        statusHtml = `
+                            <div class="alert alert-warning border-warning p-2 mt-2 mb-0 shadow-sm">
+                                <h6 class="fw-bold text-dark"><i class="bi bi-gift-fill"></i> Late Delivery Offer</h6>
+                                <p class="mb-1 small text-muted">Sorry for the delay! Here is a discount:</p>
+                                <div class="d-flex justify-content-between small">
+                                    <span>New Date:</span> <strong class="text-dark">${data.offerDate}</strong>
+                                </div>
+                                <div class="d-flex justify-content-between small mb-2">
+                                    <span>New Price:</span> <strong class="text-danger">$${data.offerPrice}</strong>
+                                </div>
+                                <button class="btn btn-success btn-sm w-100 fw-bold" onclick="acceptOffer('${docSnap.id}', '${data.offerPrice}', '${data.offerDate}')">Accept Offer</button>
+                            </div>
+                        `;
+                    } else if (data.status === "Confirmed") {
+                        statusHtml = `<div class="mt-2 pt-2 border-top text-success fw-bold small">✅ Confirmed on ${data.deliveryDate}</div>`;
+                    } else {
+                        statusHtml = `<div class="mt-2 pt-2 border-top text-primary fw-bold small">${data.status}</div>`;
+                    }
+
+                    list.innerHTML += `
+                        <div class="card status-card p-3 mb-2 shadow-sm">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <span class="fw-bold">${data.carName}</span>
+                                <span class="badge ${badge}">${data.membership}</span>
+                            </div>
+                            <div class="small text-muted">Price: $${data.price}</div>
+                            ${statusHtml}
+                        </div>
+                    `;
+                });
+            });
+        }
+
+        document.getElementById('logoutBtn').addEventListener('click', () => signOut(auth).then(() => window.location.href = 'index.html'));
+    </script>
+</body>
+</html>

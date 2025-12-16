@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin - OS Scheduler</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #eef2f6; font-family: 'Segoe UI', sans-serif; }
+        .top-panel { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .order-card { border: none; border-left: 6px solid #ccc; background: white; transition: all 0.3s ease; }
+        .prio-1 { border-left-color: #dc3545; background-color: #fff8f8; } /* Platinum */
+        .prio-2 { border-left-color: #ffc107; background-color: #fffff0; } /* Gold */
+        .prio-3 { border-left-color: #28a745; background-color: #f0fff4; } /* Normal */
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark px-4 py-3 shadow">
+        <div class="container-fluid">
+            <a class="navbar-brand fw-bold text-uppercase" href="#">Management Console</a>
+            <button id="logoutBtn" class="btn btn-outline-danger btn-sm fw-bold">Logout</button>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="top-panel p-4 mb-4">
+            <h5 class="fw-bold text-secondary mb-3">⚙️ Scheduling Control Center</h5>
+            <div class="row g-3 align-items-end">
+                <div class="col-md-5">
+                    <label class="form-label fw-bold text-muted small">Select Algorithm</label>
+                    <select id="algoSelector" class="form-select border-2">
+                        <option value="FCFS">First Come First Serve (FCFS)</option>
+                        <option value="Priority">Priority (Platinum > Gold > Normal)</option>
+                        <option value="SJF">Shortest Job First (SJF)</option>
+                        <option value="SRJF">Shortest Remaining Job First (SRJF)</option>
+                        <option value="RR">Round Robin (Quantum=2)</option>
+                        <option value="HRRN">Highest Response Ratio Next (HRRN)</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-primary w-100 fw-bold" onclick="runScheduling()">🔄 Sort Queue</button>
+                </div>
+                <div class="col-md-4 text-end">
+                    <div class="p-2 bg-light rounded border text-center">
+                        <small class="text-muted d-block">Current Mode</small>
+                        <span id="sortStatus" class="fw-bold text-success">Default (FCFS)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h5 class="fw-bold mb-3 ps-2 border-start border-4 border-primary">Pending Orders Queue</h5>
+        <div id="ordersContainer" class="row g-3">
+            <div class="col-12 text-center py-5">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2 text-muted">Connecting to Database...</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { auth, db } from './firebase-config.js';
+        import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+        import { collection, onSnapshot, doc, updateDoc, deleteDoc, orderBy, query } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+        let allOrders = [];
+
+        onAuthStateChanged(auth, (user) => {
+            if (!user) window.location.href = 'admin-login.html';
+            else fetchOrders();
+        });
+
+        function fetchOrders() {
+            const q = query(collection(db, "orders")); 
+            onSnapshot(q, (snapshot) => {
+                allOrders = [];
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data();
+                    if (data.status !== "Rejected") { // Show all except rejected
+                        allOrders.push({
+                            id: docSnap.id,
+                            ...data,
+                            at: data.timestamp ? data.timestamp.seconds : Date.now()/1000,
+                            bt: Number(data.burstTime) || 5, 
+                            priority: Number(data.priority) || 3,
+                            price: Number(data.price) || 0
+                        });
+                    }
+                });
+                renderOrders(allOrders); 
+            });
+        }
+
+        window.renderOrders = (list) => {
+            const container = document.getElementById('ordersContainer');
+            container.innerHTML = "";
+
+            if (list.length === 0) {
+                container.innerHTML = "<div class='col-12 text-center py-4 text-muted bg-white rounded shadow-sm'>No orders found.</div>";
+                return;
+            }
+
+            list.forEach((order, i) => {
+                let pClass = `prio-${order.priority}`; 
+                let pName = order.priority === 1 ? "💎 PLATINUM" : (order.priority === 2 ? "🥇 GOLD" : "👤 NORMAL");
+                let priceDisplay = order.price ? `$${order.price.toLocaleString()}` : 'N/A';
+                
+                // Status Logic
+                let statusBadge = "bg-warning text-dark";
+                if(order.status === "Confirmed") statusBadge = "bg-success text-white";
+                if(order.status === "Offer Sent") statusBadge = "bg-info text-dark";
+
+                // Action HTML Logic
+                let actionHTML = "";
+                
+                if(order.status === "Pending") {
+                    actionHTML = `
+                        <div class="input-group input-group-sm mb-2">
+                            <span class="input-group-text bg-light fw-bold">Date</span>
+                            <input type="date" id="date-${order.id}" class="form-control">
+                            <button class="btn btn-success fw-bold" onclick="confirmOrder('${order.id}')">Confirm</button>
+                        </div>
+                        
+                        <div class="border-top my-2"></div>
+
+                        <label class="small text-danger fw-bold mb-1">Late? Send Discount Offer:</label>
+                        <div class="input-group input-group-sm mb-1">
+                            <input type="date" id="offerDate-${order.id}" class="form-control" title="New Delivery Date">
+                            <input type="number" id="offerPrice-${order.id}" class="form-control" placeholder="New Price ($)">
+                        </div>
+                        <button class="btn btn-warning btn-sm w-100 fw-bold mb-2" onclick="sendOffer('${order.id}')">Send Offer</button>
+                        
+                        <button class="btn btn-outline-danger btn-sm w-100" onclick="deleteOrder('${order.id}')">Reject Order</button>
+                    `;
+                } else if (order.status === "Offer Sent") {
+                    actionHTML = `
+                        <div class="alert alert-info p-2 mb-0 small">
+                            <strong>⏳ Offer Sent!</strong><br>
+                            Proposed Date: ${order.offerDate}<br>
+                            Discount Price: $${order.offerPrice}<br>
+                            <em>Waiting for user response...</em>
+                        </div>
+                    `;
+                } else {
+                    actionHTML = `
+                        <div class="alert alert-success p-2 mb-0 small">
+                            <strong>✅ Confirmed</strong><br>
+                            Delivery: ${order.deliveryDate}<br>
+                            Final Price: $${order.price}
+                            <button class="btn btn-outline-danger btn-sm w-100 mt-1" onclick="deleteOrder('${order.id}')">Delete History</button>
+                        </div>
+                    `;
+                }
+
+                container.innerHTML += `
+                    <div class="col-12">
+                        <div class="card order-card ${pClass} mb-2 shadow-sm">
+                            <div class="card-body py-3">
+                                <div class="row align-items-center">
+                                    <div class="col-md-1 d-none d-md-block text-center">
+                                        <h3 class="fw-bold text-secondary opacity-50">#${i + 1}</h3>
+                                    </div>
+                                    <div class="col-md-3 border-end">
+                                        <h5 class="fw-bold text-primary mb-0">${order.carName}</h5>
+                                        <p class="text-danger fw-bold mb-1 fs-6">Original: ${priceDisplay}</p>
+                                        <small class="text-muted d-block text-truncate">📧 ${order.userEmail}</small>
+                                        <span class="badge ${statusBadge} mt-1">${order.status}</span>
+                                    </div>
+                                    <div class="col-md-3 border-end ps-4">
+                                        <div class="mb-1">
+                                            <span class="badge bg-dark">${pName}</span>
+                                            <span class="badge bg-light text-dark border">Prio: ${order.priority}</span>
+                                        </div>
+                                        <p class="mb-0 small"><strong>Burst Time:</strong> ${order.bt} Days</p>
+                                        <p class="mb-0 small"><strong>Arrival:</strong> ${new Date(order.at * 1000).toLocaleTimeString()}</p>
+                                    </div>
+                                    <div class="col-md-5 ps-4">
+                                        ${actionHTML}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        };
+
+        // Algorithm Logic
+        window.runScheduling = () => {
+            const algo = document.getElementById('algoSelector').value;
+            document.getElementById('sortStatus').innerText = algo;
+            let sorted = [...allOrders];
+
+            if (algo === 'FCFS') sorted.sort((a, b) => a.at - b.at);
+            else if (algo === 'Priority') sorted.sort((a, b) => (a.priority - b.priority) || (a.at - b.at));
+            else if (algo === 'SJF') sorted.sort((a, b) => a.bt - b.bt);
+            else if (algo === 'HRRN') {
+                let time = Date.now() / 1000;
+                sorted.sort((a, b) => (((time - a.at)+a.bt)/a.bt) - (((time - b.at)+b.bt)/b.bt)).reverse();
+            }
+            else if (algo === 'RR') sorted.sort((a, b) => a.at - b.at);
+
+            renderOrders(sorted);
+        };
+
+        // Actions
+        window.confirmOrder = async (id) => {
+            const date = document.getElementById(`date-${id}`).value;
+            if(!date) return alert("Select Date!");
+            await updateDoc(doc(db, "orders", id), { status: "Confirmed", deliveryDate: date });
+        };
+
+        window.sendOffer = async (id) => {
+            const date = document.getElementById(`offerDate-${id}`).value;
+            const price = document.getElementById(`offerPrice-${id}`).value;
+
+            if(!date || !price) return alert("Please enter both Date and Discount Price!");
+
+            await updateDoc(doc(db, "orders", id), { 
+                status: "Offer Sent", 
+                offerDate: date, // Saving Offer Date
+                offerPrice: price, // Saving Offer Price
+                adminMessage: "User Action Required"
+            });
+            alert("Offer Sent!");
+        };
+
+        window.deleteOrder = async (id) => {
+            if(confirm("Delete?")) await deleteDoc(doc(db, "orders", id));
+        };
+
+        document.getElementById('logoutBtn').addEventListener('click', () => signOut(auth).then(() => window.location.href = 'admin-login.html'));
+    </script>
+</body>
+</html>
